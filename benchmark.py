@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import json
+import torch
 import torch.multiprocessing as mp
 from scipy.optimize import curve_fit
 from model import DMM
@@ -8,6 +9,7 @@ from dmm_utils import run_dmm, avalanche_analysis_mp, avalanche_size_distributio
 mp.set_start_method('spawn', force=True)
 import matplotlib.pyplot as plt
 import math
+import plotly.graph_objects as go
 
 
 #############################################################################################################################################################################################
@@ -19,13 +21,15 @@ batch = 100 #number of instances in a batch
 num_iterations = 2 #number of batches to run
 max_step = int(1e6) #maximum simulation step
 tag = '_testing' #tag to add to file names
-big_ns = np.array([[10, 20, 30], [40, 50, 60]]) #array of system sizes N to simulate; include all sizes in which parameters were tuned simultaneously in the same sublist
+#big_ns = np.array([[10, 20, 30], [40, 50, 60]]) #array of system sizes N to simulate; include all sizes in which parameters were tuned simultaneously in the same sublist
+big_ns = np.array([[10]])
 total_param_list = [[1.0, 1.0, 0.02]] #[[0.08, 0.08, 0.35], [0.08, 0.5, 0.35], [0.08, 1.0, 0.35], [0.08, 3.0, 0.6], [0.08, 20.0, 1.0],
                     #[0.5, 0.08, 0.035], [0.5, 0.5, 0.035], [0.5, 1.0, 0.035], [0.5, 3.0, 0.06], [0.5, 20.0, 0.35],
                     #[1.0, 0.08, 0.002], [1.0, 0.5, 0.0035], [1.0, 1.0, 0.02], [1.0, 3.0, 0.035], [1.0, 20.0, 0.2],
                     #[3.0, 0.08, 0.001], [3.0, 0.5, 0.006], [3.0, 1.0, 0.006], [3.0, 3.0, 0.01], [3.0, 20.0, 0.1],
                     #[20.0, 0.08, 0.0006], [20.0, 0.5, 0.001], [20.0, 1.0, 0.002], [20.0, 3.0, 0.006], [20.0, 20.0, 0.035]] #list of parameters to simulate at each system size ([a, b, c], where \beta = a*\beta_{opt}, \zeta = b*\zeta_{opt}, time_window = c)
 plotting_transient = 0 #number of initial integration steps which are not plotted
+interactive = True #specifies whether or not interactive (plotly) trajectories are plotted
 #############################################################################################################################################################################################
 
 
@@ -103,6 +107,36 @@ def trajectory_plotter(traj, time_traj_to_plot, i, j, num_of_trajs, plotting_tra
     plt.clf()
 
 
+#Plots interactive trajectories of a given array of data using Plotly
+def plotly_trajectory_plotter(traj, time_traj_to_plot, i, j, num_of_trajs, plotting_transient, y_label, file_label, zoom_factor, GR=False):
+    fig = go.Figure()
+    time_traj_to_plot = np.array(time_traj_to_plot)
+    
+    for k in range(num_of_trajs):
+        if GR == True:
+            for l in range(3):
+                traj_to_plot = [element[j][k][l] for element in traj[i]]
+                fig.add_trace(go.Scatter(x=time_traj_to_plot, y=traj_to_plot, mode='lines', 
+                                         name=f'Traj {k} Component {l}'))
+        else:
+            traj_to_plot = [element[j][k] for element in traj[i]]
+            fig.add_trace(go.Scatter(x=time_traj_to_plot, y=traj_to_plot, mode='lines', 
+                                     name=f'Traj {k}'))
+            
+    fig.update_layout(
+        title=f"{y_label} Trajectories",
+        xaxis_title="Time",
+        yaxis_title=y_label,
+        hovermode="x unified",
+        template="plotly_white"
+    )
+    
+    # Apply initial transient crop 
+    fig.update_xaxes(range=[time_traj_to_plot[plotting_transient], time_traj_to_plot[-1]])
+    
+    fig.write_html(f'{file_label}.html')
+
+
 #Main function that initializes/simulates a DMM
 #Also extracts supplementary data if desired (e.g., avalanche size distributions, number of anti-instantons, number of solved instances per batch, and TTS distributions)
 def param_scaling(param, name, eqn_choice, prob_type, batch, ns, simple, flattened_big_ns, last_iteration, time_window, max_step):
@@ -136,8 +170,10 @@ def param_scaling(param, name, eqn_choice, prob_type, batch, ns, simple, flatten
             files.append(file)
         dmm = DMM(files, simple, batch=batch, param=param, eqn_choice=eqn_choice)
         save_steps = 6000 #total number of steps where 
+        #save_steps = max_step #total number of steps where 
         transient = 0 #number of steps
-        break_t = 0.5 #proportion of instances which must be solved before a batch is solved
+        #break_t = 0.5 #proportion of instances which must be solved before a batch is solved
+        break_t = 1.0 #proportion of instances which must be solved before a batch is solved
         if simple:
             is_solved, solved_step, unsat_moments, spin_traj_n, time_traj_n, step = \
                 run_dmm(dmm, max_step, simple, save_steps, transient, break_threshold=break_t)
@@ -248,6 +284,12 @@ if __name__ == '__main__':
                     param_scaling(param_i, str(param_index), eqn_choice, prob_type, batch, ns, simple, flattened_big_ns, last_iteration, param_i['time_window'], max_step)
                 else:
                     spin_traj, time_traj, v_traj, xl_traj, xs_traj, C_traj, G_traj, R_traj, dt_traj = param_scaling(param_i, str(param_index), eqn_choice, prob_type, batch, ns, simple, flattened_big_ns, last_iteration, param_i['time_window'], max_step)
+                   
+                    #Calculates number of satisfied clauses
+                    num_sat_clauses_traj = []
+                    for C_n in C_traj:
+                        num_sat_n = [ (C_step < 0.5).sum(dim=-1, keepdim=True).cpu().numpy() for C_step in C_n ]
+                        num_sat_clauses_traj.append(num_sat_n)
 
                     if last_iteration == True:
                         for i in range(len(ns)): #iterates over variable number, could be up to i in range(len(ns))
@@ -263,6 +305,16 @@ if __name__ == '__main__':
                                 trajectory_plotter(C_traj, time_traj_to_plot, i, j, 10, plotting_transient, 'Clause Functions', f'{file_label}_C_{param_index}', 10)
                                 trajectory_plotter(G_traj, time_traj_to_plot, i, j, 10, plotting_transient, 'Gradient Terms', f'{file_label}_G_{param_index}', 10, GR=True)
                                 trajectory_plotter(R_traj, time_traj_to_plot, i, j, 10, plotting_transient, 'Rigidity Terms', f'{file_label}_R_{param_index}', 10, GR=True)
+                                trajectory_plotter(num_sat_clauses_traj, time_traj_to_plot, i, j, 1, plotting_transient, 'Number of Satisfied Clauses', f'{file_label}_num_sat_clauses_{param_index}', 10)
+                                if interactive:
+                                    plotly_trajectory_plotter(v_traj, time_traj_to_plot, i, j, 10, plotting_transient, 'Voltages', f'{file_label}_v_{param_index}', 10)
+                                    plotly_trajectory_plotter(xs_traj, time_traj_to_plot, i, j, 10, plotting_transient, 'Short Term Memories', f'{file_label}_xs_{param_index}', 10)
+                                    plotly_trajectory_plotter(xl_traj, time_traj_to_plot, i, j, 10, plotting_transient, 'Long Term Memories', f'{file_label}_xl_{param_index}', 10)
+                                    plotly_trajectory_plotter(C_traj, time_traj_to_plot, i, j, 10, plotting_transient, 'Clause Functions', f'{file_label}_C_{param_index}', 10)
+                                    plotly_trajectory_plotter(G_traj, time_traj_to_plot, i, j, 10, plotting_transient, 'Gradient Terms', f'{file_label}_G_{param_index}', 10, GR=True)
+                                    plotly_trajectory_plotter(R_traj, time_traj_to_plot, i, j, 10, plotting_transient, 'Rigidity Terms', f'{file_label}_R_{param_index}', 10, GR=True)
+                                    plotly_trajectory_plotter(num_sat_clauses_traj, time_traj_to_plot, i, j, 1, plotting_transient, 'Number of Satisfied Clauses', f'{file_label}_num_sat_clauses_{param_index}', 10)
+                                
                                 #Plots timestep dt
                                 dt_traj_to_plot = [element[j] for element in dt_traj[i]]
                                 plt.plot(time_traj_to_plot, dt_traj_to_plot)
@@ -273,4 +325,12 @@ if __name__ == '__main__':
                                 plt.ylabel('dt')
                                 plt.tight_layout()
                                 plt.savefig(f'results/{prob_type}/Benchmark/{flattened_big_ns}/n{ns[i]}_batch{j}_dt_{param_index}.png')
+                                
+                                if interactive:
+                                    dt_fig = go.Figure()
+                                    dt_fig.add_trace(go.Scatter(x=time_traj_to_plot, y=dt_traj_to_plot, mode='lines', name='dt'))
+                                    dt_fig.add_hline(y=1e-1, line_dash="dash", line_color="red")
+                                    dt_fig.update_layout(title="Timestep (dt) Trajectory", xaxis_title="Time", yaxis_title="dt", yaxis_type="log", template="plotly_white")
+                                    dt_fig.write_html(f'results/{prob_type}/Benchmark/{flattened_big_ns}/n{ns[i]}_batch{j}_dt_{param_index}.html')
+                                
                                 plt.clf()

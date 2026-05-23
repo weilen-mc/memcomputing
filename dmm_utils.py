@@ -77,7 +77,7 @@ def run_dmm(dmm, max_steps, simple, save_steps=0, transient=10, break_threshold=
                     C_traj.append(C)
                     G_traj.append(G)
                     R_traj.append(R)
-        if n_solved > break_threshold * dmm.batch:
+        if n_solved >= break_threshold * dmm.batch:
         # if (n_solved_minibatch > break_threshold * dmm.minibatch).all():
             break
 

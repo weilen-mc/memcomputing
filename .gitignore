@@ -9,3 +9,6 @@ test.py
 training/
 parameters/
 data/
+.agents/
+.python-version
+uv.lock
