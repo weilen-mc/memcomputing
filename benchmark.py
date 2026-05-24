@@ -17,9 +17,12 @@ import plotly.graph_objects as go
 eqn_choice = 'sean_choice' #specifies DMM equations; can ONLY take on the values 'sean_choice', 'diventra_choice', 'yuanhang_choice', and 'zeta_zero' (and 'R_zero', 'rudy_choice', or 'rudy_simple' for XORSAT)
 prob_type = '3SAT' #specficies type of CO problem to solve; prob_type can ONLY take on the values '3SAT', '3R3X', OR '5R5X'
 simple = False #specifies whether or not data trajectories are plotted (simple = True -> no trajectory plotting)
-batch = 100 #number of instances in a batch
-num_iterations = 2 #number of batches to run
-max_step = int(1e6) #maximum simulation step
+# batch = 100
+batch = 5 #number of instances in a batch
+# num_iterations = 2
+num_iterations = 1 #number of batches to run
+# max_step = 1e6
+max_step = 200 #maximum simulation step
 tag = '_testing' #tag to add to file names
 #big_ns = np.array([[10, 20, 30], [40, 50, 60]]) #array of system sizes N to simulate; include all sizes in which parameters were tuned simultaneously in the same sublist
 big_ns = np.array([[10]])
@@ -29,8 +32,13 @@ total_param_list = [[1.0, 1.0, 0.02]] #[[0.08, 0.08, 0.35], [0.08, 0.5, 0.35], [
                     #[3.0, 0.08, 0.001], [3.0, 0.5, 0.006], [3.0, 1.0, 0.006], [3.0, 3.0, 0.01], [3.0, 20.0, 0.1],
                     #[20.0, 0.08, 0.0006], [20.0, 0.5, 0.001], [20.0, 1.0, 0.002], [20.0, 3.0, 0.006], [20.0, 20.0, 0.035]] #list of parameters to simulate at each system size ([a, b, c], where \beta = a*\beta_{opt}, \zeta = b*\zeta_{opt}, time_window = c)
 plotting_transient = 0 #number of initial integration steps which are not plotted
+n_plot = 5 #number of instances (out of batch) for which detailed trajectory plots and animations are generated
 interactive = True #specifies whether or not interactive (plotly) trajectories are plotted
+animation = True #specifies whether or not animations of 3SAT circuit representations are generated
 #############################################################################################################################################################################################
+
+from dataset import import_data
+from animation_utils import create_3sat_circuit_animation
 
 
 #A collection of useful functions for fitting to data
@@ -239,6 +247,11 @@ if __name__ == '__main__':
     __spec__ = None
     mp.set_start_method('spawn', force=True)
 
+    if animation:
+        if simple:
+            print("WARNING: 'animation = True' requires 'simple = False' to collect trajectories. Overriding simple = False.")
+            simple = False
+
     flattened_big_ns = str(big_ns.flatten().tolist()) + tag
     result_dir = f'results/{prob_type}/Benchmark/{flattened_big_ns}'
     os.makedirs(result_dir, exist_ok=True)
@@ -294,7 +307,7 @@ if __name__ == '__main__':
                     if last_iteration == True:
                         for i in range(len(ns)): #iterates over variable number, could be up to i in range(len(ns))
 
-                            for j in range(5): #iterates over batch, could be up to j in range(batch)
+                            for j in range(min(n_plot, time_traj[i].shape[0])): #iterates over batch, could be up to j in range(batch)
                                 time_traj_to_plot = time_traj[i][j]
                                 file_label = f'results/{prob_type}/Benchmark/{flattened_big_ns}/n{ns[i]}_batch{j}'
 
@@ -333,4 +346,26 @@ if __name__ == '__main__':
                                     dt_fig.update_layout(title="Timestep (dt) Trajectory", xaxis_title="Time", yaxis_title="dt", yaxis_type="log", template="plotly_white")
                                     dt_fig.write_html(f'results/{prob_type}/Benchmark/{flattened_big_ns}/n{ns[i]}_batch{j}_dt_{param_index}.html')
                                 
+                                if animation:
+                                    if prob_type == '3SAT':
+                                        cnf_file = f'data/p0_080/ratio_4_30/var_{ns[i]}/instances/transformed_barthel_n_{ns[i]}_r_4.300_p0_0.080_instance_{j+1:03d}.cnf'
+                                    elif prob_type == '3R3X':
+                                        cnf_file = f'data/XORSAT/3R3X/{ns[i]}/problem_{j:04d}.cnf'
+                                    elif prob_type == '5R5X':
+                                        cnf_file = f'data/XORSAT/5R5X/{ns[i]}/problem_{j:04d}.cnf'
+                                    else:
+                                        cnf_file = None
+                                    
+                                    if cnf_file and os.path.exists(cnf_file):
+                                        clause_idx_list, clause_sign_list, _, _, _, _ = import_data(cnf_file)
+                                        create_3sat_circuit_animation(
+                                            clause_idx=clause_idx_list[0],
+                                            clause_sign=clause_sign_list[0],
+                                            v_traj=v_traj[i],
+                                            time_traj=time_traj[i],
+                                            C_traj=C_traj[i],
+                                            batch_idx=j,
+                                            output_path=f'{file_label}_circuit_{param_index}'
+                                        )
+
                                 plt.clf()

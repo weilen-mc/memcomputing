@@ -125,13 +125,13 @@ def avalanche_analysis(spin_traj, time_traj, edges, time_window):
             cluster_sizes.append(cluster_size_i)
     except RecursionError:
         warnings.warn('Maximum recursion depth exceeded.')
-        return np.zeros(1, dtype=np.float32), memory_flag
+        return np.zeros(1, dtype=np.float32), torch.zeros(1), memory_flag
     except torch.cuda.OutOfMemoryError:
         warnings.warn('Out of memory.')
         memory_flag = True
-        return np.zeros(1, dtype=np.float32), memory_flag
+        return np.zeros(1, dtype=np.float32), torch.zeros(1), memory_flag
     if len(cluster_sizes) == 0:
-        return np.zeros(1, dtype=np.float32), memory_flag
+        return np.zeros(1, dtype=np.float32), torch.zeros(1), memory_flag
     else:
         cluster_sizes = torch.cat(cluster_sizes)
         cluster_sizes = cluster_sizes[cluster_sizes > 0].cpu().numpy()
